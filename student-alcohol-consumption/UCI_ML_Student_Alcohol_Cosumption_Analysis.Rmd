@@ -4,7 +4,8 @@ author: "Desource90"
 date: "January 26, 2017"
 output: 
   html_document: 
-    toc: true
+    keep_md: yes
+    toc: yes
 ---
 
 ```{r}
@@ -21,7 +22,7 @@ We have some data obtained from a survey of some Portugal post-secondary student
 
 # Data
 
-```{r, echo = FALSE}
+```{r}
 sdata = suppressMessages(read_csv("student-por.csv"))
 sdata %>% 
   head(1e2) %>% 
