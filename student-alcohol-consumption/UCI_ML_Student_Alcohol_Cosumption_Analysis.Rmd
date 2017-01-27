@@ -1,0 +1,191 @@
+---
+title: "Alcohol Consumption and Final Grades"
+author: "Desource90"
+date: "January 26, 2017"
+output: 
+  html_document: 
+    toc: true
+---
+
+```{r}
+library(needs)
+needs(tidyverse,
+      plotly,
+      formattable,
+      DT,
+      randomForest,
+      gridExtra)
+```
+
+We have some data obtained from a survey of some Portugal post-secondary students. Let's take a look at the data. Data comes from https://archive.ics.uci.edu/ml/datasets/STUDENT+ALCOHOL+CONSUMPTION.
+
+# Data
+
+```{r, echo = FALSE}
+sdata = suppressMessages(read_csv("student-por.csv"))
+sdata %>% 
+  head(1e2) %>% 
+  formattable(align = "l") %>% 
+  as.datatable(rownames = FALSE, options = list(scrollX = TRUE))
+```
+
+Quite a few features in this dataset..
+ 
+ * `school`: Some abbreviation for the school attended.
+ * `age`: students age, in years.
+ * `address`: Binary variable, `U` for urban and `R` for rural.
+ * `famsize`: Binary variable, `GT3` for greater than 3 family members, `LT3` less than 3.
+ * `Pstatus`: parent cohabitation status, `T` for living together and `A` for apart.
+ * `Medu`: Categorical variable about mother's education level.
+ * `Fedu`: Categorical variable about father's education level.
+ * `reason`: Reason for choosing school - close to `home`; school `reputation`; `course` preference; `other`.
+ * `guardian`: Primary guardian, I guess.
+ * `traveltime`: Categorical variable about time it takes to get to school.
+ * `G1` - first period grade. I think a period is like a quarter or semester?
+ * `G2` - second period grade
+ * `G3` - final grade. I wonder if this is just an average of G1 & G2.. let's check
+ 
+```{r, echo=FALSE}
+sdata %>% 
+  head(10) %>% 
+  select(G1:G3) %>% 
+  formattable()
+```
+
+I guess not, so 3 periods.
+
+ ... There a lot more variables actually, we'll just look up what they mean when we get to them.
+
+Looks like a lot of these variables - even the numerical ones - are actually categorical. Let's transform them so it's clearer when we plot them and the numerical ones aren't treated as continuous variables later.
+```{r}
+sdata = sdata %>% 
+  mutate(Medu = ordered(Medu, levels = c(0:4), labels = c("No Ed?","Primary Ed", "5th-9th Grade", "Secondary Ed", "Higher Ed")),
+         Fedu = ordered(Fedu, levels = c(0:4), labels = c("No Ed?", "Primary Ed", "5th-9th Grade", "Secondary Ed", "Higher Ed")),
+         traveltime = ordered(traveltime, levels = c(1:4), labels = c("<15 min", "15-30 min", "30 min-1 hr", ">1 hr")),
+         studytime = ordered(studytime, levels = c(1:4), labels = c("<2 hrs","2-5 hrs","5-10 hrs","10 hrs"))) %>% 
+  mutate_at(.cols = vars(reason, school, sex, address, famsize, Pstatus, Mjob, Fjob, reason,guardian,schoolsup:health),
+            .funs = as.factor)
+```
+ 
+Let's take a look at some of these columns.
+
+## Age
+
+What's the distribution of age?
+
+```{r, echo=FALSE}
+sdata %>%
+  count(age) %>% 
+  formattable(align = "l")
+```
+
+That's interesting. Given that this is a survey for high school students, I'm surprised to see any individuals above 18. I wonder if these particular students flunked a couple grades or if they're just not taking the survey seriously lying about their age..
+
+```{r}
+sdata %>% 
+  mutate(`Classes Failed` = as.factor(failures)) %>% 
+  ggplot(aes(age),  width=.5) + 
+  theme_minimal() +
+  geom_bar(aes(fill = `Classes Failed`))
+```
+
+It looks like most of the older students are reporting that they've failed more classes, which makes sense. However, a lot of the age 19 students still report no class failures. Ashamed... maybe? Or possibly just joined school later.
+
+
+# Alcohol Consumption and Grades
+
+Let's take a look at how reported alcohol consumption affects final grades.
+
+```{r}
+sdata = sdata %>% 
+    mutate(Dalc = ordered(Dalc, labels = c("very low", "low", "medium", "high", "very high")),
+           Walc = ordered(Walc, labels = c("very low", "low", "medium", "high", "very high")),
+           address = factor(address, levels = c("R", "U"), labels = c("Rural", "Urban")))
+         
+dalc_count <- sdata %>% 
+  count(Dalc)
+
+walc_count <- sdata %>% 
+  count(Walc)
+
+sdata %>% 
+  ggplot(aes(Walc,G3)) + 
+  ylab("Final Grade") +
+  xlab("Weekend Alcohol Consumption") +
+  geom_boxplot(fill="red") +
+  theme_minimal() +
+  geom_text(data=walc_count,aes(x =  Walc, y = 20, label= paste("n =", n)), 
+            colour="black", inherit.aes=FALSE, parse=FALSE) ->
+  g1
+
+sdata %>% 
+  ggplot(aes(Dalc,G3)) + 
+  ylab("Final Grade") +
+  xlab("Weekday Alcohol Consumption") +
+  geom_boxplot(fill="red") +
+  theme_minimal() +
+  geom_text(data=dalc_count,aes(x =  Dalc, y = 20, label=paste("n =", n)), 
+            colour="black", inherit.aes=FALSE, parse=FALSE) ->
+  g2
+
+grid.arrange(g1, g2, ncol = 2)
+```
+
+Seems like high levels of weekday alcohol consumption aren't very good for your grades. Doesn't look like weekend consumption affects it as much though.
+
+# Alcohol Consumption and Absences
+
+```{r}
+sdata %>% 
+  ggplot(aes(absences)) +
+  geom_density(fill = "red") +
+  ggtitle("Weekday Alcohol Consumption")+
+  facet_grid(~Dalc) -> g1
+
+sdata %>% 
+  ggplot(aes(absences)) +
+  ggtitle("Weekend Alcohol Consumption") +
+  geom_density(fill = "red") +
+  facet_grid(~Walc) -> g2
+
+grid.arrange(g1, g2, nrow =2)
+```
+
+Not too surprising, more drinking - more absences.
+
+
+# Factors Influencing Students' Grades
+
+We'll exclude any grades from previous periods and failed classes since we're trying see what factors besides the students' previous academic performance affects their final grade. Fitting a random forest model and taking a look at the variable importance plot.
+```{r}
+set.seed(711)
+
+sdata %>% 
+  select(-G2, -G1, -failures) ->
+  d
+
+fit <-randomForest(G3~., data=d, importance=T)
+fit
+```
+
+% Variance explained is pretty low, doesn't seem like we can do a very good job understanding academic performance given these features. More informative features could be things such as family income, hours of sleep, books read this year, etc.
+
+```{r, echo=FALSE}
+varImpPlot(fit,type=1)
+```
+
+
+Top factors influencing final grades
+  
+  * `higher`: Whether the student wants to pursue higher education
+  * `studytime`: Ordered categorical variable of how much student studies
+  * `Walc` & `Dalc`: Weekend & weekday alcohol consumption
+  * `Medu`: Mother's education level
+  * `Age`: Age of the student
+
+I wonder why mother's education matters more than father's? Could be because the mother is the primary guardian in most cases and has a bigger influence on the kid's diets, teaching kids' learning/study habits. Would be interesting to look at the subset where the mother isn't the guardian and see if we see similar important for mother's education. I don't think we have enough observations though.
+
+```{r, echo=FALSE}
+table(sdata$guardian) %>% formattable()
+```
+
