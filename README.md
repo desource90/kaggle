@@ -1,2 +1,6 @@
-# kaggle
-Repository for code used in Kaggle datasets / competitions. Mainly for practicing Python / machine learning
+# Kaggle
+Repository for code written for Kaggle datasets / competitions.
+
+- SMS Spam Detection - Use NLP libraries to process text and build a spam classifier. R
+- Student Alcohol Consumption - EDA on alcohol consumption and its effect on final grades. R
+- HR Analytics - EDA and using decision trees to explain high-performers are leaving the company. Python
